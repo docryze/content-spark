@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../config/app_config.dart';
 import '../constants/app_enums.dart';
 import '../models/app_models.dart';
 import '../services/glm_stream_service.dart';
@@ -109,14 +110,16 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
 
   /// 开始流式生成
   Future<void> startGeneration({required String userInput, String? category}) async {
-    // 检查配额
-    final user = _ref.read(userProfileProvider);
-    if (!user.canGenerate) {
-      state = const StreamGenState(
-        status: GenStatus.error,
-        errorMessage: '今日免费次数已用完',
-      );
-      return;
+    // 检查配额（本地测试可关闭）
+    if (!AppConfig.disableQuota) {
+      final user = _ref.read(userProfileProvider);
+      if (!user.canGenerate) {
+        state = const StreamGenState(
+          status: GenStatus.error,
+          errorMessage: '今日免费次数已用完',
+        );
+        return;
+      }
     }
 
     state = const StreamGenState(status: GenStatus.generating);

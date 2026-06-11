@@ -20,6 +20,10 @@ class AppConfig {
   static String get glmModel =>
       dotenv.env['GLM_MODEL'] ?? 'glm-4-flash';
 
+  /// 是否关闭配额限制（本地测试用，默认关闭）
+  static bool get disableQuota =>
+      (dotenv.env['DISABLE_QUOTA'] ?? 'false').toLowerCase() == 'true';
+
   // 新暗色系色彩
   static const Color primaryColor = Color(0xFF7C5CFC);
   static const Color accentColor = Color(0xFF00D9A6);
