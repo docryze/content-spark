@@ -34,12 +34,11 @@ class MainNavigator extends StatefulWidget {
 
 class _MainNavigatorState extends State<MainNavigator> {
   int _idx = 0;
-  static const _pages = <Widget>[HomeScreen(), HistoryScreen(), ProfileScreen()];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _idx, children: _pages),
+      body: _buildPage(_idx),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _idx,
         onTap: (i) => setState(() => _idx = i),
@@ -50,5 +49,14 @@ class _MainNavigatorState extends State<MainNavigator> {
         ],
       ),
     );
+  }
+
+  Widget _buildPage(int index) {
+    switch (index) {
+      case 0: return const HomeScreen();
+      case 1: return const HistoryScreen();
+      case 2: return const ProfileScreen();
+      default: return const HomeScreen();
+    }
   }
 }

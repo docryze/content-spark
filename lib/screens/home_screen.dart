@@ -18,10 +18,12 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _inputController = TextEditingController();
+  final _scrollController = ScrollController();
 
   @override
   void dispose() {
     _inputController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -32,52 +34,167 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final genState = ref.watch(streamGenProvider);
     final user = ref.watch(userProfileProvider);
     final isGenerating = genState.status == GenStatus.generating;
+    final hasResult = genState.status != GenStatus.idle;
 
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [AppConfig.deepBg, Color(0xFF0D0F2B)],
+    return Scaffold(
+      // 生成中有结果时，用独立 Scaffold 确保全屏
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [AppConfig.deepBg, Color(0xFF0D0F2B)],
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.only(top: 8, bottom: 100),
-          children: [
-            // ===== 顶部 Header =====
-            _buildHeader(user, platform),
-            const SizedBox(height: 24),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: const EdgeInsets.only(top: 8, bottom: 100),
+            child: Column(
+              children: [
+                // ===== 顶部 Header =====
+                _buildHeader(user, platform),
+                const SizedBox(height: 24),
 
-            // ===== 平台选择 — 横向胶囊 =====
-            _buildPlatformSelector(platform),
-            const SizedBox(height: 20),
+                // ===== 没有结果时显示输入区 =====
+                if (!hasResult) ...[
+                  // 平台选择
+                  _buildPlatformSelector(platform),
+                  const SizedBox(height: 20),
 
-            // ===== 内容类型 — 圆角卡片网格 =====
-            _buildContentTypeGrid(contentType),
-            const SizedBox(height: 20),
+                  // 内容类型
+                  _buildContentTypeGrid(contentType),
+                  const SizedBox(height: 20),
 
-            // ===== 灵感输入区 — 毛玻璃输入框 =====
-            _buildInputArea(isGenerating),
-            const SizedBox(height: 20),
+                  // 输入区
+                  _buildInputArea(isGenerating),
+                  const SizedBox(height: 20),
 
-            // ===== 流式输出区 — 打字机效果 =====
-            if (genState.status != GenStatus.idle) _buildStreamOutput(genState),
+                  // 生成按钮
+                  _buildGenerateButton(),
+                  const SizedBox(height: 12),
 
-            // ===== 生成按钮 — 渐变发光 =====
-            if (genState.status == GenStatus.idle || genState.status == GenStatus.error)
-              _buildGenerateButton(isGenerating),
-            const SizedBox(height: 12),
+                  // 提示
+                  _buildQuotaHint(user),
+                ],
 
-            // ===== 配额提示 =====
-            _buildQuotaHint(user),
-          ],
+                // ===== 有结果时显示预览（全屏） =====
+                if (hasResult) ...[
+                  // 返回按钮 + 状态栏
+                  _buildResultHeader(genState),
+                  const SizedBox(height: 16),
+
+                  // 帖子预览卡片
+                  _buildStreamOutput(genState),
+                  const SizedBox(height: 16),
+
+                  // 底部操作
+                  if (genState.status == GenStatus.done) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () => ref.read(streamGenProvider.notifier).reset(),
+                              icon: const Icon(Icons.refresh_rounded, size: 16),
+                              label: const Text('重新生成'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
   // ==================== UI 组件 ====================
+
+  Widget _buildResultHeader(StreamGenState genState) {
+    final isDone = genState.status == GenStatus.done;
+    final hasError = genState.status == GenStatus.error;
+    final platform = ref.read(selectedPlatformProvider);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          // 返回按钮
+          GestureDetector(
+            onTap: () => ref.read(streamGenProvider.notifier).reset(),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppConfig.surfaceDark,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppConfig.glassBorder),
+              ),
+              child: const Icon(Icons.arrow_back_ios_new, size: 16, color: AppConfig.textPrimary),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // 平台标识
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                platform.accentColor.withValues(alpha: 0.2),
+                platform.accentColor.withValues(alpha: 0.05),
+              ]),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: platform.accentColor.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(platform.emoji, style: const TextStyle(fontSize: 16)),
+                const SizedBox(width: 6),
+                Text(
+                  platform.displayName,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: platform.accentColor),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // 状态
+          if (genState.status == GenStatus.generating)
+            Row(
+              children: [
+                SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: platform.accentColor),
+                ),
+                const SizedBox(width: 6),
+                Text('生成中', style: TextStyle(fontSize: 12, color: platform.accentColor, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          if (isDone)
+            const Row(
+              children: [
+                Icon(Icons.check_circle, color: AppConfig.accentColor, size: 16),
+                SizedBox(width: 4),
+                Text('已完成', style: TextStyle(fontSize: 12, color: AppConfig.accentColor, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          if (hasError)
+            const Row(
+              children: [
+                Icon(Icons.error_outline, color: AppConfig.accentPink, size: 16),
+                SizedBox(width: 4),
+                Text('失败', style: TextStyle(fontSize: 12, color: AppConfig.accentPink, fontWeight: FontWeight.w600)),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildHeader(UserProfile user, SocialPlatform platform) {
     return Padding(
@@ -101,7 +218,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ],
           ),
-          // 当前平台胶囊
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
@@ -139,7 +255,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               duration: const Duration(milliseconds: 250),
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
               decoration: isActive
-                  ? AppTheme.glowButton(color: AppConfig.primaryColor)
+                  ? AppTheme.glowButton(color: p.accentColor)
                   : BoxDecoration(
                       color: AppConfig.surfaceDark,
                       borderRadius: BorderRadius.circular(28),
@@ -300,36 +416,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // 有解析内容 — 使用帖子预览卡片
     if (state.parsedContent != null) {
       final p = state.parsedContent!;
-      // 只要解析出了任何有意义的内容就用预览卡片
       if (p.titles.isNotEmpty || p.content.isNotEmpty || p.tags.isNotEmpty || p.topics.isNotEmpty) {
-        return Column(
-          children: [
-            PostPreviewCard(
-              parsed: p,
-              platform: platform,
-              contentType: contentType,
-              isGenerating: isGenerating,
-              onCopyContent: () => _copyText(p.content),
-              onCopyAll: () => _copyText(_formatAllContent(p)),
-            ),
-            if (isDone) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => ref.read(streamGenProvider.notifier).reset(),
-                        icon: const Icon(Icons.refresh_rounded, size: 16),
-                        label: const Text('重新生成'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
+        return PostPreviewCard(
+          parsed: p,
+          platform: platform,
+          contentType: contentType,
+          isGenerating: isGenerating,
+          onCopyContent: () => _copyText(p.content),
+          onCopyAll: () => _copyText(_formatAllContent(p)),
         );
       }
     }
@@ -381,7 +475,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return buf.toString();
   }
 
-  Widget _buildGenerateButton(bool isGenerating) {
+  Widget _buildGenerateButton() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: GestureDetector(
@@ -444,6 +538,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       userInput: input,
       category: category.isEmpty ? null : category,
     );
+    // 生成后自动滚动到底部
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   void _copyText(String text) {
