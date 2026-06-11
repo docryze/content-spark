@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/app_config.dart';
 import '../constants/app_enums.dart';
 import 'platform_style_engine.dart';
+import 'deai_engine.dart';
 import 'sse/sse_client.dart';
 
 /// 流式生成事件
@@ -19,7 +21,7 @@ class StreamChunk {
 class GlmStreamService {
   final SseClient _sse = SseClient();
 
-  /// 流式生成内容 — 返回 Stream<StreamChunk>
+  /// 流式生成内容 — 创作模式
   Stream<StreamChunk> generateStream({
     required SocialPlatform platform,
     required ContentType contentType,
@@ -33,7 +35,36 @@ class GlmStreamService {
       userInput: userInput,
       category: category,
     );
+    yield* _doStream(template.systemPrompt, userMessage);
+  }
 
+  /// 自定义流式 — 改编模式
+  Stream<StreamChunk> customStream({
+    required String systemPrompt,
+    required String userPrompt,
+  }) async* {
+    yield* _doStream(systemPrompt, userPrompt);
+  }
+
+  /// 去 AI 味 — 检测（非流式，同步调用）
+  Future<String> detectAI(String content) async {
+    final prompt = DeaiEngine.buildDetectPrompt(content);
+    return _callApi(prompt.system, prompt.user);
+  }
+
+  /// 去 AI 味 — 改写（流式）
+  Stream<StreamChunk> rewriteAIStream({
+    required String content,
+    String? issues,
+  }) async* {
+    final prompt = DeaiEngine.buildRewritePrompt(content: content, issues: issues != null ? [issues] : null);
+    yield* _doStream(prompt.system, prompt.user, outputRaw: true);
+  }
+
+  // ==================== 内部方法 ====================
+
+  /// 核心流式调用
+  Stream<StreamChunk> _doStream(String systemPrompt, String userPrompt, {bool outputRaw = false}) async* {
     String fullContent = '';
     bool inMarkdownBlock = false;
 
@@ -47,8 +78,8 @@ class GlmStreamService {
         body: {
           'model': AppConfig.glmModel,
           'messages': [
-            {'role': 'system', 'content': template.systemPrompt},
-            {'role': 'user', 'content': userMessage},
+            {'role': 'system', 'content': systemPrompt},
+            {'role': 'user', 'content': userPrompt},
           ],
           'temperature': 0.85,
           'top_p': 0.9,
@@ -60,62 +91,76 @@ class GlmStreamService {
       await for (final rawDelta in sseStream) {
         fullContent += rawDelta;
 
-        // 过滤 markdown 代码块包裹
-        final displayDelta = _filterDisplay(rawDelta, fullContent, inMarkdownBlock);
-        if (displayDelta.wasFiltered) {
-          inMarkdownBlock = displayDelta.inBlock;
-        }
-        if (displayDelta.text.isNotEmpty) {
-          yield StreamChunk(delta: displayDelta.text);
+        if (outputRaw) {
+          // 纯文本输出（去AI味改写），不过滤 markdown
+          yield StreamChunk(delta: rawDelta);
+        } else {
+          final displayDelta = _filterDisplay(rawDelta, fullContent, inMarkdownBlock);
+          if (displayDelta.wasFiltered) inMarkdownBlock = displayDelta.inBlock;
+          if (displayDelta.text.isNotEmpty) {
+            yield StreamChunk(delta: displayDelta.text);
+          }
         }
       }
 
-      // 流结束，返回清理后的完整文本
-      final cleaned = _stripMarkdown(fullContent);
+      final cleaned = outputRaw ? fullContent.trim() : _stripMarkdown(fullContent);
       yield StreamChunk(isDone: true, fullText: cleaned);
     } catch (e) {
-      yield StreamChunk(error: '生成失败：$e', isDone: true);
+      yield StreamChunk(error: '请求失败：$e', isDone: true);
     }
   }
 
-  /// 过滤显示用的增量文本
+  /// 非流式 API 调用
+  Future<String> _callApi(String systemPrompt, String userPrompt) async {
+    // 用 SSE 但只取最终结果
+    final completer = Completer<String>();
+    String full = '';
+    final stream = _doStream(systemPrompt, userPrompt);
+    stream.listen(
+      (chunk) {
+        if (chunk.error != null && !completer.isCompleted) {
+          completer.completeError(chunk.error!);
+        }
+        if (chunk.isDone && !completer.isCompleted) {
+          completer.complete(chunk.fullText ?? full);
+        }
+        full += chunk.delta;
+      },
+      onError: (e) {
+        if (!completer.isCompleted) completer.completeError(e);
+      },
+      onDone: () {
+        if (!completer.isCompleted) completer.complete(full);
+      },
+    );
+    return completer.future;
+  }
+
+  /// 过滤 markdown 代码块
   _FilterResult _filterDisplay(String delta, String full, bool inBlock) {
-    // 检测 ```json 开头
     if (full.contains('```json')) {
-      // 已经开始输出 markdown 包裹
-      // 检查包裹是否结束（有换行后的内容）
       final afterBlock = full.replaceFirst(RegExp(r'```json\s*\n?'), '');
-      if (afterBlock.length > 0 && afterBlock != full) {
-        // 包裹标记后的第一个实质内容，返回标记后的部分
+      if (afterBlock.isNotEmpty && afterBlock != full) {
         if (full.endsWith(delta)) {
-          // delta 包含了 ```json 后的内容
           if (delta.startsWith('```')) {
-            // delta 以 ``` 开头，需要去掉
-            final cleaned = delta.replaceFirst(RegExp(r'```json\s*\n?'), '');
-            return _FilterResult(cleaned, true, true);
+            return _FilterResult(delta.replaceFirst(RegExp(r'```json\s*\n?'), ''), true, true);
           }
         }
         return _FilterResult(delta, true, true);
       }
       return _FilterResult('', true, true);
     }
-
     if (full.contains('```') && !full.contains('```json')) {
-      // 可能是简单的 ``` 包裹
       if (delta == '```' || delta == '``' || delta == '`') {
         return _FilterResult('', true, true);
       }
     }
-
-    // 检查结尾的 ``` 闭合标记
     if (delta.endsWith('```')) {
       return _FilterResult(delta.substring(0, delta.length - 3), false, false);
     }
-
     return _FilterResult(delta, false, inBlock);
   }
 
-  /// 去除 markdown 代码块包裹
   String _stripMarkdown(String text) {
     var c = text;
     final jsonBlock = RegExp(r'^```json\s*\n?');
@@ -125,22 +170,13 @@ class GlmStreamService {
     } else if (simpleBlock.hasMatch(c)) {
       c = c.replaceFirst(simpleBlock, '');
     }
-    if (c.endsWith('```')) {
-      c = c.substring(0, c.length - 3);
-    }
+    if (c.endsWith('```')) c = c.substring(0, c.length - 3);
     return c.trim();
   }
-
-  /// 尝试解析 JSON
-  Map<String, dynamic>? tryParseJson(String text) {
-    final cleaned = _stripMarkdown(text);
-    try {
-      return jsonDecode(cleaned) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-  }
 }
+
+/// Provider 实例
+final streamApiProvider = Provider<GlmStreamService>((ref) => GlmStreamService());
 
 class _FilterResult {
   final String text;

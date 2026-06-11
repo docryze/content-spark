@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../constants/app_enums.dart';
 import '../models/app_models.dart';
@@ -10,63 +11,68 @@ import '../services/storage_service.dart';
 
 /// Storage 单例
 final storageProvider = FutureProvider<StorageService>((ref) async {
-  final service = StorageService();
-  await service.init();
-  return service;
+  final svc = StorageService();
+  await svc.init();
+  return svc;
 });
 
-/// 流式 API 服务
-final streamApiProvider = Provider<GlmStreamService>((ref) => GlmStreamService());
-
-/// 当前平台
-final selectedPlatformProvider = StateProvider<SocialPlatform>((ref) => SocialPlatform.xiaohongshu);
-
-/// 当前内容类型
-final selectedContentTypeProvider = StateProvider<ContentType>((ref) => ContentType.article);
-
-/// 当前领域
-final selectedCategoryProvider = StateProvider<String>((ref) => '');
-
-/// 用户 Profile
+/// 用户资料
 final userProfileProvider = StateNotifierProvider<UserProfileNotifier, UserProfile>((ref) {
   return UserProfileNotifier(ref);
 });
 
 class UserProfileNotifier extends StateNotifier<UserProfile> {
   final Ref _ref;
-  UserProfileNotifier(this._ref) : super(UserProfile(id: 'local_user')) {
+  UserProfileNotifier(this._ref) : super(UserProfile(id: 'local')) {
     _load();
   }
-
   Future<void> _load() async {
     try {
       final s = await _ref.read(storageProvider.future);
-      state = state.copyWith(
+      state = UserProfile(
+        id: 'local',
         nickname: s.getNickname(),
         plan: s.getPlan(),
-        usedQuotaToday: s.getUsedQuotaToday(),
       );
     } catch (_) {}
   }
-
   Future<void> useQuota() async {
-    final s = await _ref.read(storageProvider.future);
-    await s.incrementUsedQuota();
     state = state.copyWith(usedQuotaToday: state.usedQuotaToday + 1);
+    try { final s = await _ref.read(storageProvider.future); await s.incrementUsedQuota(); } catch (_) {}
   }
-
-  Future<void> setNickname(String n) async {
-    final s = await _ref.read(storageProvider.future);
-    await s.setNickname(n);
-    state = state.copyWith(nickname: n);
-  }
-
   Future<void> setPlan(SubscriptionPlan p) async {
-    final s = await _ref.read(storageProvider.future);
-    await s.setPlan(p);
     state = state.copyWith(plan: p);
+    try { final s = await _ref.read(storageProvider.future); await s.setPlan(p); } catch (_) {}
+  }
+  Future<void> setNickname(String name) async {
+    state = state.copyWith(nickname: name);
+    try { final s = await _ref.read(storageProvider.future); await s.setNickname(name); } catch (_) {}
   }
 }
+
+/// 历史记录
+final historyProvider = FutureProvider<List<GenerationResult>>((ref) async {
+  final s = await ref.read(storageProvider.future);
+  return s.getHistory();
+});
+
+/// 选中平台
+final selectedPlatformProvider = StateProvider<SocialPlatform>((ref) => SocialPlatform.xiaohongshu);
+
+/// 选中内容类型
+final selectedContentTypeProvider = StateProvider<ContentType>((ref) => ContentType.article);
+
+/// 选中创作模式
+final selectedModeProvider = StateProvider<CreateMode>((ref) => CreateMode.create);
+
+/// 选中品类
+final selectedCategoryProvider = StateProvider<String>((ref) => '');
+
+/// 改编模式 — 目标平台多选
+final targetPlatformsProvider = StateProvider<List<SocialPlatform>>((ref) => [
+  SocialPlatform.douyin,
+  SocialPlatform.wechat,
+]);
 
 // ==================== 流式生成状态 ====================
 
@@ -77,7 +83,7 @@ class StreamGenState {
   final String streamedText;
   final String? errorMessage;
   final GenerationResult? finalResult;
-  final StreamContentParser? parsedContent; // 增量解析的结构化内容
+  final StreamContentParser? parsedContent;
 
   const StreamGenState({
     this.status = GenStatus.idle,
@@ -110,19 +116,16 @@ final streamGenProvider = StateNotifierProvider<StreamGenNotifier, StreamGenStat
 
 class StreamGenNotifier extends StateNotifier<StreamGenState> {
   final Ref _ref;
-
   StreamGenNotifier(this._ref) : super(const StreamGenState());
 
-  /// 开始流式生成
+  void reset() => state = const StreamGenState();
+
+  /// 开始流式生成（创作模式）
   Future<void> startGeneration({required String userInput, String? category}) async {
-    // 检查配额（本地测试可关闭）
     if (!AppConfig.disableQuota) {
       final user = _ref.read(userProfileProvider);
       if (!user.canGenerate) {
-        state = const StreamGenState(
-          status: GenStatus.error,
-          errorMessage: '今日免费次数已用完',
-        );
+        state = const StreamGenState(status: GenStatus.error, errorMessage: '今日免费次数已用完');
         return;
       }
     }
@@ -149,7 +152,6 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
       }
       if (chunk.delta.isNotEmpty) {
         accumulated += chunk.delta;
-        // 实时增量解析
         parser.parse(accumulated);
         state = StreamGenState(
           status: GenStatus.generating,
@@ -158,16 +160,10 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
         );
       }
       if (chunk.isDone) {
-        // 解析最终 JSON
         final parsed = _parseResult(accumulated, platform, contentType, userInput);
-        // 保存历史
         if (parsed != null) {
-          try {
-            final s = await _ref.read(storageProvider.future);
-            await s.saveGeneration(parsed);
-          } catch (_) {}
+          try { final s = await _ref.read(storageProvider.future); await s.saveGeneration(parsed); } catch (_) {}
         }
-        // 扣次数（测试模式不扣）
         if (!AppConfig.disableQuota) {
           await _ref.read(userProfileProvider.notifier).useQuota();
         }
@@ -181,63 +177,117 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
     }
   }
 
-  GenerationResult? _parseResult(String raw, SocialPlatform p, ContentType t, String input) {
-    final parsed = _tryParseJson(raw);
-    if (parsed == null) return null;
+  /// 改编模式 — 流式生成（自定义 prompt）
+  Future<void> startCustomStream({
+    required String systemPrompt,
+    required String userPrompt,
+    SocialPlatform? platform,
+  }) async {
+    state = const StreamGenState(status: GenStatus.generating);
+    final api = _ref.read(streamApiProvider);
 
-    List<String> titles = [];
-    if (parsed['titles'] is List) {
-      titles = (parsed['titles'] as List).map((e) {
-        if (e is String) return e;
-        if (e is Map) return e['title']?.toString() ?? '';
-        return '';
-      }).toList();
-    }
-    List<String> tags = [];
-    if (parsed['tags'] is List) {
-      tags = (parsed['tags'] as List).map((e) => e.toString()).toList();
-    }
+    String accumulated = '';
+    final parser = StreamContentParser();
 
-    return GenerationResult(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      platform: p,
-      contentType: t,
-      userInput: input,
-      titleVariants: titles,
-      content: parsed['content']?.toString() ?? raw,
-      tags: tags,
-      coverTextSuggestion: parsed['coverText']?.toString() ?? '',
-      publishTimeSuggestion: parsed['publishTime']?.toString() ?? '',
-      createdAt: DateTime.now(),
+    final stream = api.customStream(
+      systemPrompt: systemPrompt,
+      userPrompt: userPrompt,
     );
-  }
 
-  Map<String, dynamic>? _tryParseJson(String text) {
-    var c = text.trim();
-    try {
-      return jsonDecode(c) as Map<String, dynamic>;
-    } catch (_) {
-      // 流式服务已经去除了 markdown 包裹，这里做兜底
-      for (final p in ['```json', '```']) {
-        if (c.startsWith(p)) c = c.substring(p.length);
+    await for (final chunk in stream) {
+      if (chunk.error != null) {
+        state = StreamGenState(status: GenStatus.error, errorMessage: chunk.error);
+        return;
       }
-      if (c.endsWith('```')) c = c.substring(0, c.length - 3);
-      c = c.trim();
-      try {
-        return jsonDecode(c) as Map<String, dynamic>;
-      } catch (_) {
-        return null;
+      if (chunk.delta.isNotEmpty) {
+        accumulated += chunk.delta;
+        parser.parse(accumulated);
+        state = StreamGenState(
+          status: GenStatus.generating,
+          streamedText: accumulated,
+          parsedContent: parser,
+        );
+      }
+      if (chunk.isDone) {
+        state = StreamGenState(
+          status: GenStatus.done,
+          streamedText: accumulated,
+          parsedContent: parser,
+        );
       }
     }
   }
 
-  void reset() {
-    state = const StreamGenState();
+  /// 去 AI 味 — 检测（非流式）
+  Future<void> detectAI(String content) async {
+    state = const StreamGenState(status: GenStatus.generating);
+    final api = _ref.read(streamApiProvider);
+
+    try {
+      final result = await api.detectAI(content);
+      state = StreamGenState(
+        status: GenStatus.done,
+        streamedText: result,
+      );
+    } catch (e) {
+      state = StreamGenState(status: GenStatus.error, errorMessage: e.toString());
+    }
+  }
+
+  /// 去 AI 味 — 改写（流式）
+  Future<void> rewriteAI({
+    required String content,
+    String? issues,
+  }) async {
+    state = const StreamGenState(status: GenStatus.generating);
+    final api = _ref.read(streamApiProvider);
+
+    String accumulated = '';
+
+    final stream = api.rewriteAIStream(content: content, issues: issues);
+
+    await for (final chunk in stream) {
+      if (chunk.error != null) {
+        state = StreamGenState(status: GenStatus.error, errorMessage: chunk.error);
+        return;
+      }
+      if (chunk.delta.isNotEmpty) {
+        accumulated += chunk.delta;
+        state = StreamGenState(
+          status: GenStatus.generating,
+          streamedText: accumulated,
+        );
+      }
+      if (chunk.isDone) {
+        state = StreamGenState(
+          status: GenStatus.done,
+          streamedText: accumulated,
+        );
+      }
+    }
+  }
+
+  GenerationResult? _parseResult(String raw, SocialPlatform p, ContentType t, String input) {
+    try {
+      String cleaned = raw.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replaceAll(RegExp(r'^```\w*\n?'), '').replaceAll(RegExp(r'\n?```$'), '');
+      }
+      final json = jsonDecode(cleaned) as Map<String, dynamic>;
+      return GenerationResult(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        platform: p,
+        contentType: t,
+        userInput: input,
+        titleVariants: (json['titles'] as List<dynamic>?)?.cast<String>() ?? [],
+        content: json['content'] as String? ?? '',
+        tags: (json['tags'] as List<dynamic>?)?.cast<String>() ?? [],
+        coverTextSuggestion: json['coverText'] as String? ?? '',
+        publishTimeSuggestion: json['publishTime'] as String? ?? '',
+        createdAt: DateTime.now(),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }
-
-/// 历史记录
-final historyProvider = FutureProvider<List<GenerationResult>>((ref) async {
-  final s = await ref.read(storageProvider.future);
-  return s.getHistory();
-});
