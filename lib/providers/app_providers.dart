@@ -5,6 +5,7 @@ import '../config/app_config.dart';
 import '../constants/app_enums.dart';
 import '../models/app_models.dart';
 import '../services/glm_stream_service.dart';
+import '../services/stream_content_parser.dart';
 import '../services/storage_service.dart';
 
 /// Storage 单例
@@ -73,15 +74,17 @@ enum GenStatus { idle, generating, done, error }
 
 class StreamGenState {
   final GenStatus status;
-  final String streamedText;     // 已流式到达的文本
+  final String streamedText;
   final String? errorMessage;
-  final GenerationResult? finalResult; // 完成后解析的结构化结果
+  final GenerationResult? finalResult;
+  final StreamContentParser? parsedContent; // 增量解析的结构化内容
 
   const StreamGenState({
     this.status = GenStatus.idle,
     this.streamedText = '',
     this.errorMessage,
     this.finalResult,
+    this.parsedContent,
   });
 
   StreamGenState copyWith({
@@ -89,12 +92,14 @@ class StreamGenState {
     String? streamedText,
     String? errorMessage,
     GenerationResult? finalResult,
+    StreamContentParser? parsedContent,
   }) =>
       StreamGenState(
         status: status ?? this.status,
         streamedText: streamedText ?? this.streamedText,
         errorMessage: errorMessage ?? this.errorMessage,
         finalResult: finalResult ?? this.finalResult,
+        parsedContent: parsedContent ?? this.parsedContent,
       );
 }
 
@@ -128,6 +133,7 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
     final contentType = _ref.read(selectedContentTypeProvider);
 
     String accumulated = '';
+    final parser = StreamContentParser();
 
     final stream = api.generateStream(
       platform: platform,
@@ -143,9 +149,12 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
       }
       if (chunk.delta.isNotEmpty) {
         accumulated += chunk.delta;
+        // 实时增量解析
+        parser.parse(accumulated);
         state = StreamGenState(
           status: GenStatus.generating,
           streamedText: accumulated,
+          parsedContent: parser,
         );
       }
       if (chunk.isDone) {
@@ -166,6 +175,7 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
           status: GenStatus.done,
           streamedText: accumulated,
           finalResult: parsed,
+          parsedContent: parser,
         );
       }
     }

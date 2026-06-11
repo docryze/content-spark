@@ -1,17 +1,20 @@
+import 'package:flutter/material.dart';
+
 /// 平台枚举 - 支持6大社交平台
 enum SocialPlatform {
-  xiaohongshu('小红书', '🔴', 'xiaohongshu'),
-  douyin('抖音', '🎵', 'douyin'),
-  wechat('公众号', '💚', 'wechat'),
-  bilibili('B站', '📺', 'bilibili'),
-  weibo('微博', '🟠', 'weibo'),
-  kuaishou('快手', '🎬', 'kuaishou');
+  xiaohongshu('小红书', '🔴', 'xiaohongshu', Color(0xFFFF2442)),
+  douyin('抖音', '🎵', 'douyin', Color(0xFF00F2EA)),
+  wechat('公众号', '💚', 'wechat', Color(0xFF07C160)),
+  bilibili('B站', '📺', 'bilibili', Color(0xFFFB7299)),
+  weibo('微博', '🟠', 'weibo', Color(0xFFFF8200)),
+  kuaishou('快手', '🎬', 'kuaishou', Color(0xFFFF4906));
 
   final String displayName;
   final String emoji;
   final String id;
+  final Color accentColor;
 
-  const SocialPlatform(this.displayName, this.emoji, this.id);
+  const SocialPlatform(this.displayName, this.emoji, this.id, this.accentColor);
 }
 
 /// 内容类型

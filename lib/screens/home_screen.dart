@@ -6,6 +6,8 @@ import '../config/app_theme.dart';
 import '../constants/app_enums.dart';
 import '../models/app_models.dart';
 import '../providers/app_providers.dart';
+import '../services/stream_content_parser.dart';
+import '../widgets/post_preview.dart';
 
 /// 全新首页 — 暗色玻璃拟态创意工作台
 class HomeScreen extends ConsumerStatefulWidget {
@@ -260,108 +262,123 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// 🔥 流式输出区域 — 打字机效果核心
+  /// 🔥 流式输出区域 — 实时帖子预览
   Widget _buildStreamOutput(StreamGenState state) {
     final hasError = state.status == GenStatus.error;
     final isDone = state.status == GenStatus.done;
-    final text = state.streamedText;
+    final isGenerating = state.status == GenStatus.generating;
+    final platform = ref.read(selectedPlatformProvider);
+    final contentType = ref.read(selectedContentTypeProvider);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: AppTheme.glassBox(tintColor: AppConfig.surfaceLight, radius: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 状态头
-            Row(
-              children: [
-                if (!isDone && !hasError)
-                  SizedBox(
-                    width: 16, height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppConfig.accentColor,
-                    ),
-                  ),
-                if (isDone)
-                  const Icon(Icons.check_circle, color: AppConfig.accentColor, size: 18),
-                if (hasError)
-                  const Icon(Icons.error_outline, color: AppConfig.accentPink, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  hasError ? '生成失败' : isDone ? '生成完成' : 'AI 正在创作...',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: hasError ? AppConfig.accentPink : AppConfig.accentColor,
-                  ),
+    // 错误状态
+    if (hasError) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: AppConfig.accentPink.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppConfig.accentPink.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.error_outline, color: AppConfig.accentPink, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  state.errorMessage ?? '生成失败',
+                  style: const TextStyle(fontSize: 14, color: AppConfig.accentPink),
                 ),
-                const Spacer(),
-                if (isDone && text.isNotEmpty)
-                  GestureDetector(
-                    onTap: () => _copyText(text),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppConfig.accentColor.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text('复制全文', style: TextStyle(fontSize: 11, color: AppConfig.accentColor, fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // 流式文本展示 — 打字机效果
-            Container(
-              constraints: const BoxConstraints(minHeight: 60),
-              child: SelectableText(
-                text.isEmpty ? '' : text,
-                style: const TextStyle(
-                  fontSize: 14,
-                  height: 1.8,
-                  color: AppConfig.textPrimary,
-                ),
-              ),
-            ),
-
-            // 错误信息
-            if (hasError && state.errorMessage != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(state.errorMessage!, style: const TextStyle(fontSize: 13, color: AppConfig.accentPink)),
-              ),
-
-            // 完成后操作按钮
-            if (isDone) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _copyText(text),
-                      icon: const Icon(Icons.copy_rounded, size: 16),
-                      label: const Text('复制'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => ref.read(streamGenProvider.notifier).reset(),
-                      icon: const Icon(Icons.refresh_rounded, size: 16),
-                      label: const Text('重新生成'),
-                    ),
-                  ),
-                ],
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    // 有解析内容 — 使用帖子预览卡片
+    if (state.parsedContent != null) {
+      final p = state.parsedContent!;
+      // 只要解析出了任何有意义的内容就用预览卡片
+      if (p.titles.isNotEmpty || p.content.isNotEmpty || p.tags.isNotEmpty || p.topics.isNotEmpty) {
+        return Column(
+          children: [
+            PostPreviewCard(
+              parsed: p,
+              platform: platform,
+              contentType: contentType,
+              isGenerating: isGenerating,
+              onCopyContent: () => _copyText(p.content),
+              onCopyAll: () => _copyText(_formatAllContent(p)),
+            ),
+            if (isDone) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => ref.read(streamGenProvider.notifier).reset(),
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('重新生成'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      }
+    }
+
+    // 还没有解析出内容 — 显示加载动画
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: AppTheme.glassBox(radius: 20),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 18, height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: platform.accentColor),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'AI 正在构思...',
+              style: TextStyle(fontSize: 14, color: platform.accentColor, fontWeight: FontWeight.w600),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  /// 格式化全部内容（用于复制）
+  String _formatAllContent(StreamContentParser p) {
+    final buf = StringBuffer();
+    if (p.titles.isNotEmpty) {
+      buf.writeln('【标题】');
+      for (var i = 0; i < p.titles.length; i++) {
+        buf.writeln('${i + 1}. ${p.titles[i]}');
+      }
+      buf.writeln();
+    }
+    if (p.content.isNotEmpty) {
+      buf.writeln('【正文】');
+      buf.writeln(p.content);
+      buf.writeln();
+    }
+    if (p.tags.isNotEmpty) {
+      buf.writeln('【标签】${p.tags.map((t) => '#$t').join(' ')}');
+    }
+    if (p.coverText.isNotEmpty) buf.writeln('\n【封面】${p.coverText}');
+    if (p.publishTime.isNotEmpty) buf.writeln('【发布时间】${p.publishTime}');
+    return buf.toString();
   }
 
   Widget _buildGenerateButton(bool isGenerating) {
