@@ -173,7 +173,61 @@ class PlatformStyleEngine {
     return _templates[platform]!;
   }
 
-  /// 生成完整的 Prompt（用户输入 + 平台模板）
+  /// 生成用户消息（不含 system prompt，传给 AI 的 user role 部分）
+  static String buildUserMessage({
+    required SocialPlatform platform,
+    required ContentType contentType,
+    required String userInput,
+    String? category,
+  }) {
+    final categoryHint = category != null ? '你专注的创作领域是：$category。' : '';
+
+    switch (contentType) {
+      case ContentType.article:
+        return '''$categoryHint
+请根据以下用户需求，生成符合${platform.displayName}平台风格的图文内容：
+
+用户需求：$userInput
+
+请严格按照以下JSON格式输出（不要加markdown代码块标记，不要输出其他任何内容）：
+{"titles": ["标题变体1", "标题变体2", "标题变体3"], "content": "正文内容", "tags": ["标签1", "标签2", "标签3", "标签4", "标签5"], "coverText": "封面文字建议", "publishTime": "最佳发布时间建议"}''';
+
+      case ContentType.videoScript:
+        return '''$categoryHint
+请根据以下用户需求，生成符合${platform.displayName}平台风格的短视频脚本：
+
+用户需求：$userInput
+
+请严格按照以下JSON格式输出（不要加markdown代码块标记，不要输出其他任何内容）：
+{"titles": ["标题变体1", "标题变体2", "标题变体3"], "content": "完整视频脚本（包含：3秒Hook设计、口播词、画面描述、BGM建议、节奏标注、互动CTA）", "tags": ["标签1", "标签2", "标签3", "标签4", "标签5"], "coverText": "封面文字建议", "publishTime": "最佳发布时间建议"}''';
+
+      case ContentType.titleOptimize:
+        return '''请对以下标题进行优化，生成5个符合${platform.displayName}平台风格的标题变体，每个标题使用不同的套路：
+
+原始标题：$userInput
+
+请严格按照以下JSON格式输出（不要加markdown代码块标记，不要输出其他任何内容）：
+{"titles": [{"title": "优化标题1", "pattern": "套路类型"}, {"title": "优化标题2", "pattern": "套路类型"}, {"title": "优化标题3", "pattern": "套路类型"}, {"title": "优化标题4", "pattern": "套路类型"}, {"title": "优化标题5", "pattern": "套路类型"}], "analysis": "原标题问题分析和优化思路"}''';
+
+      case ContentType.topicIdea:
+        return '''请为${platform.displayName}平台的创作者生成选题灵感。
+
+创作领域：$userInput
+
+请严格按照以下JSON格式输出（不要加markdown代码块标记，不要输出其他任何内容）：
+{"topics": [{"title": "选题标题", "reason": "推荐理由", "heat": "预估热度(高/中/低)", "angle": "切入角度建议"}, {"title": "选题标题", "reason": "推荐理由", "heat": "预估热度(高/中/低)", "angle": "切入角度建议"}, {"title": "选题标题", "reason": "推荐理由", "heat": "预估热度(高/中/低)", "angle": "切入角度建议"}, {"title": "选题标题", "reason": "推荐理由", "heat": "预估热度(高/中/低)", "angle": "切入角度建议"}, {"title": "选题标题", "reason": "推荐理由", "heat": "预估热度(高/中/低)", "angle": "切入角度建议"}]}''';
+
+      case ContentType.rewrite:
+        return '''请将以下内容改写为符合${platform.displayName}平台风格的版本。保持核心信息不变，但完全适配目标平台的语气、排版、emoji使用、标题风格等特征。
+
+原始内容：$userInput
+
+请严格按照以下JSON格式输出（不要加markdown代码块标记，不要输出其他任何内容）：
+{"titles": ["改写后标题1", "改写后标题2", "改写后标题3"], "content": "改写后的正文内容", "tags": ["标签1", "标签2", "标签3", "标签4", "标签5"], "coverText": "封面文字建议", "publishTime": "最佳发布时间建议"}''';
+    }
+  }
+
+  /// 生成完整的 Prompt（兼容旧接口）
   static String buildPrompt({
     required SocialPlatform platform,
     required ContentType contentType,

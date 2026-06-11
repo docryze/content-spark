@@ -92,20 +92,19 @@ class GlmApiService {
     required String userInput,
     String? category,
   }) async {
-    // 构建完整 Prompt
-    final prompt = PlatformStyleEngine.buildPrompt(
+    // 获取平台模板（system prompt）
+    final template = PlatformStyleEngine.getTemplate(platform);
+    
+    // 构建用户消息（不含 system prompt）
+    final userMessage = PlatformStyleEngine.buildUserMessage(
       platform: platform,
       contentType: contentType,
       userInput: userInput,
       category: category,
     );
 
-    // 分离 system prompt 和 user message
-    final template = PlatformStyleEngine.getTemplate(platform);
-    
-    // 调用 GLM API
-    final result = await _chat(template.systemPrompt, 
-      prompt.replaceFirst(template.systemPrompt, '').trim());
+    // 调用 GLM API：system prompt + 用户消息
+    final result = await _chat(template.systemPrompt, userMessage);
 
     // 解析结果
     List<String> titles = [];
@@ -147,15 +146,14 @@ class GlmApiService {
     required SocialPlatform platform,
     required String category,
   }) async {
-    final prompt = PlatformStyleEngine.buildPrompt(
+    final template = PlatformStyleEngine.getTemplate(platform);
+    final userMessage = PlatformStyleEngine.buildUserMessage(
       platform: platform,
       contentType: ContentType.topicIdea,
       userInput: category,
     );
 
-    final template = PlatformStyleEngine.getTemplate(platform);
-    final result = await _chat(template.systemPrompt,
-      prompt.replaceFirst(template.systemPrompt, '').trim());
+    final result = await _chat(template.systemPrompt, userMessage);
 
     final topics = <Map<String, String>>[];
     if (result.containsKey('topics')) {
