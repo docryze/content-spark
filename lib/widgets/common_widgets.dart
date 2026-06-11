@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../constants/app_enums.dart';
 import '../config/app_config.dart';
-import '../config/app_theme.dart';
 
 /// 内容类型图标
 IconData getContentTypeIcon(ContentType type) {

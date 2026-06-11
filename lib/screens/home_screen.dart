@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/app_config.dart';
 import '../config/app_theme.dart';
@@ -427,9 +428,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _copyText(String text) {
-    // 剪贴板复制
+    Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ 已复制'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
+      const SnackBar(content: Text('✅ 已复制到剪贴板'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
     );
   }
 

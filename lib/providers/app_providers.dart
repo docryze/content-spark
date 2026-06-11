@@ -104,7 +104,6 @@ final streamGenProvider = StateNotifierProvider<StreamGenNotifier, StreamGenStat
 
 class StreamGenNotifier extends StateNotifier<StreamGenState> {
   final Ref _ref;
-  StreamSubscription? _sub;
 
   StreamGenNotifier(this._ref) : super(const StreamGenState());
 
@@ -199,15 +198,20 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
 
   Map<String, dynamic>? _tryParseJson(String text) {
     var c = text.trim();
-    for (final p in ['```json', '```']) {
-      if (c.startsWith(p)) c = c.substring(p.length);
-    }
-    if (c.endsWith('```')) c = c.substring(0, c.length - 3);
-    c = c.trim();
     try {
       return jsonDecode(c) as Map<String, dynamic>;
     } catch (_) {
-      return null;
+      // 流式服务已经去除了 markdown 包裹，这里做兜底
+      for (final p in ['```json', '```']) {
+        if (c.startsWith(p)) c = c.substring(p.length);
+      }
+      if (c.endsWith('```')) c = c.substring(0, c.length - 3);
+      c = c.trim();
+      try {
+        return jsonDecode(c) as Map<String, dynamic>;
+      } catch (_) {
+        return null;
+      }
     }
   }
 
