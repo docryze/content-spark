@@ -1,0 +1,51 @@
+name: content_spark
+description: "AI社媒内容创作助手 - 一键生成符合各平台风格的爆款内容"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  
+  # 状态管理
+  flutter_riverpod: ^2.6.1
+  
+  # 网络
+  dio: ^5.7.0
+  
+  # 环境变量
+  flutter_dotenv: ^5.2.1
+  
+  # 本地存储
+  shared_preferences: ^2.3.4
+  
+  # UI 工具
+  flutter_animate: ^4.5.2
+  google_fonts: ^6.2.1
+  shimmer: ^3.0.0
+  
+  # 工具
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  share_plus: ^10.1.4
+  url_launcher: ^6.3.1
+  connectivity_plus: ^6.1.4
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.14
+  json_serializable: ^6.9.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/
+    - .env
