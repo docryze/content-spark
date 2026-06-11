@@ -158,7 +158,10 @@ class StreamGenNotifier extends StateNotifier<StreamGenState> {
             await s.saveGeneration(parsed);
           } catch (_) {}
         }
-        await _ref.read(userProfileProvider.notifier).useQuota();
+        // 扣次数（测试模式不扣）
+        if (!AppConfig.disableQuota) {
+          await _ref.read(userProfileProvider.notifier).useQuota();
+        }
         state = StreamGenState(
           status: GenStatus.done,
           streamedText: accumulated,

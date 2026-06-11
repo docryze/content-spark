@@ -92,7 +92,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppConfig.textPrimary)),
               const SizedBox(height: 2),
               Text(
-                '剩余 ${user.remainingQuota == 999 ? '∞' : user.remainingQuota} 次',
+                AppConfig.disableQuota
+                    ? '测试模式 · 无限制'
+                    : '剩余 ${user.remainingQuota == 999 ? '∞' : user.remainingQuota} 次',
                 style: const TextStyle(fontSize: 12, color: AppConfig.textSecondary),
               ),
             ],
